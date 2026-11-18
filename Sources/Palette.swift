@@ -156,3 +156,41 @@ struct SocGauge: View {
         .aspectRatio(1, contentMode: .fit)
     }
 }
+
+struct IconBadge: View {
+    let icon: String
+    let color: Color
+    var size: CGFloat = 40
+    var body: some View {
+        Text(icon).font(.system(size: size * 0.45))
+            .frame(width: size, height: size)
+            .background(color.opacity(0.22))
+            .clipShape(Circle())
+            .overlay(Circle().stroke(color.opacity(0.6), lineWidth: 1))
+    }
+}
+
+struct ActionButton: View {
+    let icon: String
+    let label: String
+    let accent: Color
+    let active: Bool
+    let enabled: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Text(icon).font(.system(size: 22)).foregroundColor(accent)
+                    .frame(width: 58, height: 58)
+                    .background(accent.opacity(active ? 0.35 : 0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(accent, lineWidth: 1.5))
+                Text(label).font(.system(size: 11)).foregroundColor(Pal.text)
+                    .multilineTextAlignment(.center).lineLimit(2)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.4)
+    }
+}

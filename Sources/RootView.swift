@@ -1,21 +1,37 @@
 import SwiftUI
 
-let appVersion = "iOS v1 - phase 1 (OBD + GPS + Live)"
+let appVersion = "iOS v2 - phase 2 (trips, stops, costs, Today/History)"
 
 struct RootView: View {
     @EnvironmentObject var obd: ObdBle
     @EnvironmentObject var gps: LocationTracker
+    @EnvironmentObject var trips: TripManager
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("keepScreenOn") private var keepAwake = true
+
     @State private var tab = 0
     @State private var now = Date()
+    @State private var sheet: SheetKind?
+    @State private var detailStart: Int64?
+    @State private var actionsTrip: Stage?
+    @State private var deleteTrip: Stage?
+    @State private var deleteSession: Stage?
+
     private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let items: [(String, String)] = [("Live", "🚗"), ("Today", "📅"), ("History", "🕘"), ("More", "☰")]
+
+    private var detail: Stage? {
+        detailStart.flatMap { s in trips.stages.first { $0.type == .trip && $0.startTime == s } }
+    }
 
     var body: some View {
         GeometryReader { geo in
             let landscape = geo.size.width > geo.size.height
             ZStack {
                 LinearGradient(colors: [Pal.bg, Pal.bg2], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
-                if landscape {
+                if detail != nil {
+                    content(landscape: landscape, size: geo.size)
+                } else if landscape {
                     HStack(spacing: 0) {
                         navBar(vertical: true)
                         content(landscape: true, size: geo.size)
@@ -36,18 +52,75 @@ struct RootView: View {
             } else { obd.moving = false }
         }
         .onAppear {
+            applyKeepAwake()
             gps.start()
             if !obd.isActive() { obd.connect() }
         }
+        .onChange(of: keepAwake) { _ in applyKeepAwake() }
+        .onChange(of: scenePhase) { _ in applyKeepAwake() }
+        .onChange(of: gps.country) { _ in trips.checkBorder(country: gps.country, adminArea: gps.adminArea, kmNow: gps.totalDistanceKm) }
+        .onChange(of: gps.adminArea) { _ in trips.checkBorder(country: gps.country, adminArea: gps.adminArea, kmNow: gps.totalDistanceKm) }
+        .sheet(item: $sheet) { kind in sheetView(kind) }
+        .confirmationDialog("Trip Actions", isPresented: Binding(get: { actionsTrip != nil }, set: { if !$0 { actionsTrip = nil } }),
+                            titleVisibility: .visible, presenting: actionsTrip) { t in
+            Button("View Details") { detailStart = t.startTime }
+            Button("Delete Trip", role: .destructive) { deleteTrip = t }
+            Button("Cancel", role: .cancel) {}
+        } message: { t in
+            Text("\(trips.dayLabel(t.startTime)) - \(trips.timeLabel(t.startTime))")
+        }
+        .alert("Delete Trip", isPresented: Binding(get: { deleteTrip != nil }, set: { if !$0 { deleteTrip = nil } }),
+               presenting: deleteTrip) { t in
+            Button("Delete", role: .destructive) {
+                trips.deleteTrip(t)
+                if detailStart == t.startTime { detailStart = nil }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Are you sure you want to delete this trip? This action cannot be undone.")
+        }
+        .alert("Delete charging session", isPresented: Binding(get: { deleteSession != nil }, set: { if !$0 { deleteSession = nil } }),
+               presenting: deleteSession) { s in
+            Button("Delete", role: .destructive) { trips.deleteStage(s) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This action cannot be undone.")
+        }
     }
+
+    private func applyKeepAwake() {
+        UIApplication.shared.isIdleTimerDisabled = keepAwake
+    }
+
+    // MARK: contenu
 
     @ViewBuilder
     private func content(landscape: Bool, size: CGSize) -> some View {
-        switch tab {
-        case 0: LiveView(now: now, landscape: landscape, availH: size.height - 16, availW: size.width, onSettings: { tab = 3 }, onExit: exitApp)
-        case 3: MoreView(onExit: exitApp)
-        default: PlaceholderView(title: tab == 1 ? "Today" : "History")
+        if let d = detail {
+            TripDetailView(trip: d, onBack: { detailStart = nil }, onDelete: { deleteTrip = d },
+                           onEditStage: { sheet = .edit($0) })
+        } else {
+            switch tab {
+            case 0:
+                LiveView(now: now, landscape: landscape, availH: size.height - 16, availW: size.width,
+                         onSettings: { tab = 3 }, onExit: exitApp, onStartEnd: startEnd, onStage: onStage)
+            case 1:
+                TodayView(now: now, tripKm: gps.totalDistanceKm, consumption: consumption,
+                          chargeLive: (obd.chargeAvgKw.map { String(format: "avg %.1f kW", $0) } ?? "avg --")
+                              + "  |  " + String(format: "%.2f kWh", obd.chargeEnergyKwh),
+                          onOpen: { detailStart = $0.startTime }, onMenu: { actionsTrip = $0 },
+                          onEdit: { sheet = .edit($0) }, onDelete: { deleteSession = $0 })
+            case 2:
+                HistoryView(onOpen: { detailStart = $0.startTime }, onMenu: { actionsTrip = $0 },
+                            onEdit: { sheet = .edit($0) }, onDelete: { deleteSession = $0 })
+            default:
+                MoreView(onExit: exitApp)
+            }
         }
+    }
+
+    private var consumption: Double? {
+        gps.totalDistanceKm > 0.3 ? obd.dischargeEnergyKwh * 100 / gps.totalDistanceKm : nil
     }
 
     private func navBar(vertical: Bool) -> some View {
@@ -70,244 +143,89 @@ struct RootView: View {
         .background(Pal.bg2.ignoresSafeArea())
     }
 
+    // MARK: actions voyage / arrêts
+
+    private func startEnd() {
+        if trips.activeVoyage == nil {
+            gps.resetDistance(); obd.resetDischargeEnergy()
+            trips.startVoyage(soc: obd.soc, kmNow: 0)
+            sheet = .tripStart
+        } else {
+            sheet = .tripEnd
+        }
+    }
+
+    private func onStage(_ t: StageType) {
+        let active = trips.activeStage?.type
+        if active == .charge && t == .chargeMeal {
+            trips.convertActiveToChargeMeal()   // "+ Meal" pendant une recharge
+        } else if active == t {
+            sheet = .stageEnd(t)
+        } else if trips.activeVoyage != nil && active == nil {
+            trips.startStage(t, kmNow: gps.totalDistanceKm, soc: obd.soc)
+        }
+    }
+
+    private func rateHint(_ st: Stage) -> String? {
+        guard st.type == .charge || st.type == .chargeMeal, let rate = trips.lastRateFor(st.endName) else { return nil }
+        var s = String(format: "Last rate here: $%.2f/kWh", rate)
+        if let kwh = st.energyKwh { s += String(format: " -> about $%.2f", rate * kwh) }
+        return s
+    }
+
+    @ViewBuilder
+    private func sheetView(_ kind: SheetKind) -> some View {
+        let city = gps.city ?? ""
+        switch kind {
+        case .tripStart:
+            PlaceDialog(title: "Trip start", defaultAddress: city, costLabels: [], presets: ["Home", "Work", "Hotel", "Other"],
+                        onConfirm: { n, a, _ in trips.setVoyageStart(name: n, address: a); sheet = nil },
+                        onCancel: { sheet = nil })
+        case .tripEnd:
+            PlaceDialog(title: "Trip end", defaultAddress: city, costLabels: [], presets: ["Home", "Work", "Hotel", "Other"],
+                        onConfirm: { n, a, _ in
+                            trips.endVoyage(name: n, address: a, soc: obd.soc, kmNow: gps.totalDistanceKm,
+                                            energyUsedKwh: obd.dischargeEnergyKwh)
+                            sheet = nil
+                        },
+                        onCancel: { sheet = nil })
+        case .stageEnd(let t):
+            PlaceDialog(title: "End: \(t.label)", defaultAddress: city, costLabels: costLabelsFor(t), presets: [],
+                        onConfirm: { n, a, costs in
+                            let isCharge = t == .charge || t == .chargeMeal
+                            let (meal, charge, other) = splitCosts(t, costs)
+                            trips.endStage(name: n, address: a, meal: meal, charge: charge, other: other,
+                                           kmNow: gps.totalDistanceKm, energyKwh: isCharge ? obd.chargeEnergyKwh : nil,
+                                           soc: obd.soc, avgKw: obd.chargeAvgKw, maxKw: obd.chargeMaxKw)
+                            sheet = nil
+                        },
+                        onCancel: { sheet = nil })
+        case .edit(let st):
+            PlaceDialog(title: "Edit: \(st.type.label)", defaultAddress: st.endAddress ?? "", costLabels: costLabelsFor(st.type),
+                        presets: [], initialName: st.endName ?? "", initialCosts: editCosts(st), costHint: rateHint(st),
+                        onConfirm: { n, a, costs in
+                            let (meal, charge, other) = splitCosts(st.type, costs)
+                            trips.updateStage(st, name: n, city: a, meal: meal, charge: charge, other: other)
+                            sheet = nil
+                        },
+                        onCancel: { sheet = nil })
+        }
+    }
+
+    private func editCosts(_ st: Stage) -> [Double?] {
+        let v: [Double]
+        switch st.type {
+        case .meal: v = [st.mealCostOf()]
+        case .charge: v = [st.chargeCostOf()]
+        case .chargeMeal: v = [st.chargeCostOf(), st.mealCostOf()]
+        default: v = [st.otherCostOf()]
+        }
+        return v.map { x -> Double? in x == 0 ? nil : x }
+    }
+
     private func exitApp() {
         obd.disconnect()
         gps.stop()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { exit(0) }
-    }
-}
-
-struct PlaceholderView: View {
-    let title: String
-    var body: some View {
-        VStack(spacing: 8) {
-            Text(title).font(.system(size: 24, weight: .bold)).foregroundColor(Pal.text)
-            Text("Coming in the next phase").font(.system(size: 13)).foregroundColor(Pal.muted)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-// MARK: - Live
-
-struct LiveView: View {
-    @EnvironmentObject var obd: ObdBle
-    @EnvironmentObject var gps: LocationTracker
-    let now: Date
-    let landscape: Bool
-    let availH: CGFloat
-    let availW: CGFloat
-    let onSettings: () -> Void
-    let onExit: () -> Void
-
-    private var consumption: Double? {
-        gps.totalDistanceKm > 0.3 ? obd.dischargeEnergyKwh * 100 / gps.totalDistanceKm : nil
-    }
-    private var region: String { [gps.adminArea, gps.country].compactMap { $0 }.joined(separator: ", ") }
-    private var altText: String {
-        "🏔 Altitude: " + ((gps.altitudeBaroM ?? gps.altitudeM).map { String(format: "%.0f m", $0) } ?? "--")
-    }
-    private var ageSec: Int? { obd.lastData.map { Int(now.timeIntervalSince($0)) } }
-    private var socNote: String {
-        var s = "Dashboard SOC"
-        if let b = obd.socBms { s += String(format: " - BMS %.1f %%", b) }
-        if let a = ageSec { s += a <= 5 ? " - live" : " - last data \(a)s ago" }
-        return s
-    }
-    private var socWarn: Bool { (ageSec ?? 0) > 10 }
-    private var maxKph: Double? { gps.maxSpeedKph > 0 ? gps.maxSpeedKph : nil }
-
-    var body: some View {
-        if landscape { landscapeBody } else { portraitBody }
-    }
-
-    private func fmt0(_ v: Double?) -> String { v.map { String(format: "%.0f", $0) } ?? "--" }
-
-    private func speedStats(avg: Double?, max: Double?, unit: String) -> some View {
-        DarkCard(padding: 8) {
-            HStack {
-                ForEach([("Average", avg), ("Max", max)], id: \.0) { item in
-                    VStack(spacing: 1) {
-                        Text(item.0).font(.system(size: 11)).foregroundColor(Pal.muted)
-                        Text(fmt0(item.1)).font(.system(size: 22, weight: .bold)).foregroundColor(Pal.text)
-                        Text(unit).font(.system(size: 11)).foregroundColor(Pal.muted)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-        }
-    }
-
-    private func socInfo(compact: Bool) -> some View {
-        let temp: String = {
-            guard let mx = obd.battTempMax, let mn = obd.battTempMin else { return "--" }
-            return mn == mx ? "\(mx)" : "\(mn)-\(mx)"
-        }()
-        let tempColor: Color = {
-            guard let mx = obd.battTempMax else { return Pal.muted }
-            if mx >= 45 { return Pal.red }
-            if (obd.battTempMin ?? mx) <= 5 { return Pal.blue }
-            return Pal.muted
-        }()
-        return VStack(alignment: .leading, spacing: compact ? 3 : 8) {
-            Text("⚡ Power").font(.system(size: 12)).foregroundColor(Pal.muted)
-            HStack(alignment: .lastTextBaseline, spacing: 2) {
-                Text(obd.powerKw.map { String(format: "%.1f", $0) } ?? "--")
-                    .font(.system(size: compact ? 28 : 34, weight: .bold))
-                    .foregroundColor((obd.powerKw ?? 0) < -0.5 ? Pal.green : Pal.text)
-                Text("kW").font(.system(size: 14)).foregroundColor(Pal.muted)
-            }
-            Divider().background(Pal.cardBorder)
-            Text("Consumption").font(.system(size: 12)).foregroundColor(Pal.muted)
-            HStack(alignment: .lastTextBaseline, spacing: 2) {
-                Text(consumption.map { String(format: "%.1f", $0) } ?? "--")
-                    .font(.system(size: compact ? 16 : 20, weight: .bold)).foregroundColor(Pal.text)
-                Text("kWh/100km").font(.system(size: 11)).foregroundColor(Pal.muted)
-            }
-            Text("🌡 \(temp) °C").font(.system(size: 12)).foregroundColor(tempColor)
-        }
-    }
-
-    @ViewBuilder private var chargingCard: some View {
-        if obd.isCharging {
-            DarkCard(border: Pal.green, padding: 10) {
-                Text("⚡ Charging").font(.system(size: 15, weight: .bold)).foregroundColor(Pal.green)
-                StatStrip(items: [
-                    ("Average", obd.chargeAvgKw.map { String(format: "%.1f kW", $0) } ?? "--"),
-                    ("Max", obd.chargeMaxKw.map { String(format: "%.1f kW", $0) } ?? "--"),
-                    ("Energy", String(format: "%.2f kWh", obd.chargeEnergyKwh))
-                ]).padding(.top, 4)
-            }
-        }
-    }
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            Text("📍").font(.system(size: landscape ? 18 : 30))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(gps.city ?? "--").font(.system(size: landscape ? 20 : 28, weight: .bold)).foregroundColor(Pal.text).lineLimit(1)
-                if !region.isEmpty && !landscape { Text(region).font(.system(size: 14)).foregroundColor(Pal.muted) }
-                Text(landscape ? ([region, altText].filter { !$0.isEmpty }.joined(separator: "  -  ")) : altText)
-                    .font(.system(size: landscape ? 11 : 13)).foregroundColor(Pal.muted).lineLimit(1)
-            }
-            Spacer()
-            Button(action: onSettings) { Text("⚙").font(.system(size: landscape ? 20 : 24)).foregroundColor(Pal.muted) }
-            Button(action: onExit) { Text("Exit").font(.system(size: landscape ? 13 : 14)).foregroundColor(Pal.red) }
-        }
-    }
-
-    private var portraitBody: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                header
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(spacing: 6) {
-                        SpeedGauge(value: gps.speedMph, maxValue: 160, majorStep: 20, unit: "mph", accent: Pal.blue)
-                        speedStats(avg: gps.avgMovingSpeedKph.map { $0 / 1.60934 }, max: maxKph.map { $0 / 1.60934 }, unit: "mph")
-                    }
-                    VStack(spacing: 6) {
-                        SpeedGauge(value: gps.speedKph, maxValue: 240, majorStep: 40, unit: "km/h", accent: Pal.green)
-                        speedStats(avg: gps.avgMovingSpeedKph, max: maxKph, unit: "km/h")
-                    }
-                }
-                DarkCard {
-                    HStack(spacing: 14) {
-                        SocGauge(soc: obd.soc).frame(maxWidth: .infinity)
-                        Rectangle().fill(Pal.cardBorder).frame(width: 1, height: 130)
-                        socInfo(compact: false).frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    Text(socNote).font(.system(size: 11)).foregroundColor(socWarn ? Pal.red : Pal.muted).padding(.top, 6)
-                }
-                chargingCard
-            }
-            .padding(.horizontal, 14).padding(.vertical, 8)
-        }
-    }
-
-    private var landscapeBody: some View {
-        let g = min(max(availH - 72, 110), 230, (availW * 0.55 - 12) / 2)
-        return HStack(alignment: .top, spacing: 12) {
-            VStack(spacing: 4) {
-                header
-                HStack {
-                    Spacer()
-                    VStack(spacing: 2) {
-                        SpeedGauge(value: gps.speedMph, maxValue: 160, majorStep: 20, unit: "mph", accent: Pal.blue)
-                            .frame(width: g, height: g)
-                        Text("Avg \(fmt0(gps.avgMovingSpeedKph.map { $0 / 1.60934 })) - Max \(fmt0(maxKph.map { $0 / 1.60934 })) mph")
-                            .font(.system(size: 11)).foregroundColor(Pal.muted)
-                    }
-                    Spacer()
-                    VStack(spacing: 2) {
-                        SpeedGauge(value: gps.speedKph, maxValue: 240, majorStep: 40, unit: "km/h", accent: Pal.green)
-                            .frame(width: g, height: g)
-                        Text("Avg \(fmt0(gps.avgMovingSpeedKph)) - Max \(fmt0(maxKph)) km/h")
-                            .font(.system(size: 11)).foregroundColor(Pal.muted)
-                    }
-                    Spacer()
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity)
-            ScrollView {
-                VStack(spacing: 8) {
-                    DarkCard(padding: 10) {
-                        HStack(spacing: 10) {
-                            SocGauge(soc: obd.soc).frame(width: 104, height: 104)
-                            socInfo(compact: true).frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        Text(socNote).font(.system(size: 10)).foregroundColor(socWarn ? Pal.red : Pal.muted).padding(.top, 4)
-                    }
-                    chargingCard
-                }
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-    }
-}
-
-// MARK: - More
-
-struct MoreView: View {
-    @EnvironmentObject var obd: ObdBle
-    @EnvironmentObject var gps: LocationTracker
-    let onExit: () -> Void
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("More").font(.system(size: 24, weight: .bold)).foregroundColor(Pal.text)
-                DarkCard {
-                    Text("OBD adapter").font(.system(size: 15, weight: .bold)).foregroundColor(Pal.text)
-                    Text(obd.state).font(.system(size: 12)).foregroundColor(Pal.muted).padding(.vertical, 4)
-                    HStack(spacing: 8) {
-                        Button("Connect OBD") { obd.connect() }.buttonStyle(.borderedProminent)
-                        Button("Disconnect") { obd.disconnect() }.buttonStyle(.bordered)
-                    }
-                }
-                DarkCard {
-                    Text("GPS").font(.system(size: 15, weight: .bold)).foregroundColor(Pal.text)
-                    Text(gps.running ? "Running (starts automatically with the app)." : "Stopped.")
-                        .font(.system(size: 12)).foregroundColor(Pal.muted).padding(.vertical, 4)
-                    HStack(spacing: 8) {
-                        Button("Start GPS") { gps.start() }.buttonStyle(.bordered)
-                        Button("Stop GPS") { gps.stop() }.buttonStyle(.bordered)
-                    }
-                }
-                DarkCard {
-                    Text("Diagnostics").font(.system(size: 15, weight: .bold)).foregroundColor(Pal.text)
-                    ForEach(Array(obd.log.suffix(40).enumerated()), id: \.offset) { _, l in
-                        Text(l).font(.system(size: 9, design: .monospaced)).foregroundColor(Pal.muted)
-                    }
-                }
-                Button(action: onExit) {
-                    Text("Exit app").foregroundColor(.white).frame(maxWidth: .infinity).padding(.vertical, 10)
-                        .background(Pal.red).clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                Text(appVersion).font(.system(size: 11)).foregroundColor(Pal.muted).frame(maxWidth: .infinity)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 8)
-        }
     }
 }
