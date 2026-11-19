@@ -210,9 +210,13 @@ struct MoreView: View {
     @EnvironmentObject var obd: ObdBle
     @EnvironmentObject var gps: LocationTracker
     let onExit: () -> Void
+    let onExportCsv: () -> Void
+    let onExportPdf: () -> Void
     @AppStorage("keepScreenOn") private var keepAwake = true
 
-    init(onExit: @escaping () -> Void) { self.onExit = onExit }
+    init(onExit: @escaping () -> Void, onExportCsv: @escaping () -> Void, onExportPdf: @escaping () -> Void) {
+        self.onExit = onExit; self.onExportCsv = onExportCsv; self.onExportPdf = onExportPdf
+    }
 
     var body: some View {
         ScrollView {
@@ -234,6 +238,14 @@ struct MoreView: View {
                         Button("Start GPS") { gps.start() }.buttonStyle(.bordered)
                         Button("Stop GPS") { gps.stop() }.buttonStyle(.bordered)
                     }
+                }
+                DarkCard {
+                    Text("Export all trips").font(.system(size: 15, weight: .bold)).foregroundColor(Pal.text)
+                    HStack(spacing: 8) {
+                        Button("Export CSV", action: onExportCsv).buttonStyle(.borderedProminent)
+                        Button("Export PDF", action: onExportPdf).buttonStyle(.borderedProminent)
+                    }
+                    .padding(.top, 6)
                 }
                 DarkCard {
                     Toggle("Keep screen on while the app is open", isOn: $keepAwake)

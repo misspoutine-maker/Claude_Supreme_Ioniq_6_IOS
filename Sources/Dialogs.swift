@@ -9,6 +9,7 @@ struct PlaceDialog: View {
     var initialName: String = ""
     var initialCosts: [Double?] = []
     var costHint: String? = nil
+    var suggestions: [ChargeStation] = []
     let onConfirm: (String, String, [Double?]) -> Void
     let onCancel: () -> Void
 
@@ -19,10 +20,11 @@ struct PlaceDialog: View {
 
     init(title: String, defaultAddress: String, costLabels: [String], presets: [String],
          initialName: String = "", initialCosts: [Double?] = [], costHint: String? = nil,
+         suggestions: [ChargeStation] = [],
          onConfirm: @escaping (String, String, [Double?]) -> Void, onCancel: @escaping () -> Void) {
         self.title = title; self.defaultAddress = defaultAddress; self.costLabels = costLabels
         self.presets = presets; self.initialName = initialName; self.initialCosts = initialCosts
-        self.costHint = costHint; self.onConfirm = onConfirm; self.onCancel = onCancel
+        self.costHint = costHint; self.suggestions = suggestions; self.onConfirm = onConfirm; self.onCancel = onCancel
     }
 
     var body: some View {
@@ -35,6 +37,16 @@ struct PlaceDialog: View {
                             Button(p) { name = (p == "Hotel") ? "Hotel: " : p }
                                 .buttonStyle(.bordered).font(.system(size: 12))
                         }
+                    }
+                }
+                if !suggestions.isEmpty {
+                    Text("Nearby stations:").font(.system(size: 12)).foregroundColor(Pal.muted)
+                    ForEach(suggestions) { st in
+                        Button { name = st.name; if !st.city.isEmpty { address = st.city } } label: {
+                            Text(st.name + (st.city.isEmpty ? "" : " - \(st.city)")).font(.system(size: 13))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.bordered)
                     }
                 }
                 field("Place name", text: $name, decimal: false)
@@ -78,13 +90,14 @@ struct PlaceDialog: View {
 }
 
 enum SheetKind: Identifiable {
-    case tripStart, tripEnd, stageEnd(StageType), edit(Stage)
+    case tripStart, tripEnd, stageEnd(StageType), edit(Stage), pendingCost(Stage)
     var id: String {
         switch self {
         case .tripStart: return "ts"
         case .tripEnd: return "te"
         case .stageEnd(let t): return "se-\(t.rawValue)"
         case .edit(let s): return "ed-\(s.startTime)-\(s.type.rawValue)"
+        case .pendingCost(let s): return "pc-\(s.startTime)"
         }
     }
 }

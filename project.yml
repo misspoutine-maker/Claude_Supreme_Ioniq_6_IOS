@@ -29,3 +29,4 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.supreme.ioniq6logger
         TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

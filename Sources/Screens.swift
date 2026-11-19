@@ -248,6 +248,8 @@ struct TripDetailView: View {
     let onBack: () -> Void
     let onDelete: () -> Void
     let onEditStage: (Stage) -> Void
+    let onExportCsv: () -> Void
+    let onExportPdf: () -> Void
 
     private func line(_ label: String, _ value: String) -> some View {
         HStack {
@@ -305,6 +307,10 @@ struct TripDetailView: View {
                         ("Cost", money(st.cost)),
                         ("Consumption", st.avgKwh100.map { String(format: "%.1f kWh/100km", $0) } ?? "--")
                     ])
+                }
+                HStack(spacing: 10) {
+                    Button("Export CSV", action: onExportCsv).buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
+                    Button("Export PDF", action: onExportPdf).buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
                 }
                 Button(action: onDelete) {
                     Text("Delete Trip").foregroundColor(Pal.red).frame(maxWidth: .infinity).padding(.vertical, 10)
