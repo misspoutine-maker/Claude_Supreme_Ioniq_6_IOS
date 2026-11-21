@@ -79,6 +79,7 @@ struct LiveView: View {
                     .font(.system(size: compact ? 16 : 20, weight: .bold)).foregroundColor(Pal.text)
                 Text("kWh/100km").font(.system(size: 11)).foregroundColor(Pal.muted)
             }
+            Text(String(format: "over %.1f km", gps.totalDistanceKm)).font(.system(size: 10)).foregroundColor(Pal.muted)
             Text("🌡 \(temp) °C").font(.system(size: 12)).foregroundColor(tempColor)
         }
     }

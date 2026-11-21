@@ -1,6 +1,6 @@
 import SwiftUI
 
-let appVersion = "iOS v3.1 (stopwatch trip + stops)"
+let appVersion = "iOS v3.2 (consumption fix)"
 
 struct RootView: View {
     @EnvironmentObject var obd: ObdBle
@@ -53,6 +53,7 @@ struct RootView: View {
             if let loc = gps.lastLocation {
                 obd.moving = t.timeIntervalSince(loc.timestamp) < 15 && (gps.speedKph ?? 0) > 3.0
             } else { obd.moving = false }
+            obd.countIdle = trips.activeVoyage != nil && trips.activeStage == nil
             if sheet == nil, let p = automation.pendingCost {
                 automation.pendingCost = nil   // une seule fois ; "Add cost" reste disponible ensuite
                 sheet = .pendingCost(p)

@@ -38,7 +38,8 @@ final class ObdBle: NSObject, ObservableObject {
     @Published var isCharging = false
     @Published var log: [String] = []
 
-    var moving = false   // fourni par le GPS
+    var moving = false      // fourni par le GPS
+    var countIdle = false   // voyage en cours (hors arrêt) : l'énergie à l'arrêt compte dans la consommation
 
     private var chargeSamples = 0
     private var chargeSumKw = 0.0
@@ -314,7 +315,8 @@ final class ObdBle: NSObject, ObservableObject {
 
         let now = Date()
         lastData = now
-        let dtHours = lastEnergyTs.map { now.timeIntervalSince($0) / 3600.0 } ?? 0.0
+        // Trou de données (reconnexion, adaptateur muet) : on n'intègre pas l'énergie sur plus de 15 s.
+        let dtHours = lastEnergyTs.map { (now.timeIntervalSince($0) <= 15 ? now.timeIntervalSince($0) : 0) / 3600.0 } ?? 0.0
         lastEnergyTs = now
 
         // Négatif = recharge, mais aussi régénération en roulant : recharge seulement à l'arrêt.
@@ -333,9 +335,10 @@ final class ObdBle: NSObject, ObservableObject {
         } else if isCharging {
             chargeSamples = 0; chargeSumKw = 0; chargeMax = 0
         }
-        // Consommation nette : régénération déduite en roulant ; à l'arrêt seule la consommation compte.
+        // Consommation nette (régénération déduite) seulement en roulant, ou à l'arrêt pendant un voyage
+        // (feux, climatisation). Hors voyage, la consommation à l'arrêt (stationnement, recharge) est ignorée.
         if moving { dischargeEnergyKwh += kw * dtHours }
-        else if kw > 0 { dischargeEnergyKwh += kw * dtHours }
+        else if countIdle && kw > 0 { dischargeEnergyKwh += kw * dtHours }
         isCharging = charging
     }
 }
