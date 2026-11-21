@@ -1,6 +1,6 @@
 import SwiftUI
 
-let appVersion = "iOS v3 - final (auto charging, exports, icon)"
+let appVersion = "iOS v3.1 (stopwatch trip + stops)"
 
 struct RootView: View {
     @EnvironmentObject var obd: ObdBle

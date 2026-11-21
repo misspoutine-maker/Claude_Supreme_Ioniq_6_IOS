@@ -122,3 +122,9 @@ struct TimelineItem: Identifiable {
     var stageStart: Int64 = 0   // début de l'étape correspondante (0 = pas modifiable)
     var id: String { "\(kind)-\(time)-\(title)" }
 }
+
+/// Chronomètre H:MM:SS.
+func fmtClock(_ ms: Int64) -> String {
+    let s = max(Int(ms / 1000), 0)
+    return String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
+}

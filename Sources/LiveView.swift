@@ -96,6 +96,39 @@ struct LiveView: View {
         }
     }
 
+    private func stageStyle(_ t: StageType) -> (String, Color) {
+        switch t {
+        case .meal: return ("🍴 Meal", Pal.orange)
+        case .charge: return ("⚡ Charge", Pal.blue)
+        case .chargeMeal: return ("⚡🍴 Charge / Meal", Pal.purple)
+        default: return ("⋯ Other stop", Pal.gray)
+        }
+    }
+
+    private func timerBlock(_ label: String, _ time: String, _ color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(label).font(.system(size: 11)).foregroundColor(Pal.muted)
+            Text(time).font(.system(size: 28, weight: .bold, design: .monospaced)).foregroundColor(color)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Chronomètres : trajet en cours et arrêt en cours.
+    @ViewBuilder private var timerCard: some View {
+        let nowT = Int64(now.timeIntervalSince1970 * 1000)
+        if trips.activeVoyage != nil || trips.activeStage != nil {
+            DarkCard(border: Pal.orange.opacity(0.6), padding: 10) {
+                HStack(alignment: .top) {
+                    if let v = trips.activeVoyage { timerBlock("🚗 Trip", fmtClock(nowT - v.startTime), Pal.orange) }
+                    if let st = trips.activeStage {
+                        let sty = stageStyle(st.type)
+                        timerBlock(sty.0, fmtClock(nowT - st.startTime), sty.1)
+                    }
+                }
+            }
+        }
+    }
+
     private var actionRow: some View {
         let tripActive = trips.activeVoyage != nil
         let standaloneActive = trips.activeStage?.standalone == true
@@ -154,6 +187,7 @@ struct LiveView: View {
                     Text(socNote).font(.system(size: 11)).foregroundColor(socWarn ? Pal.red : Pal.muted).padding(.top, 6)
                 }
                 chargingCard
+                timerCard
                 actionRow
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
@@ -195,6 +229,7 @@ struct LiveView: View {
                         Text(socNote).font(.system(size: 10)).foregroundColor(socWarn ? Pal.red : Pal.muted).padding(.top, 4)
                     }
                     chargingCard
+                    timerCard
                     actionRow
                 }
             }

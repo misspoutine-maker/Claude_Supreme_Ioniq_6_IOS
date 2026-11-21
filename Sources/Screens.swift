@@ -114,12 +114,12 @@ struct TodayView: View {
                 }
                 if let v = trips.activeVoyage {
                     DarkCard(border: Pal.orange) {
-                        Text("🚗 In progress - \(fmtDuration(nowT - v.startTime))")
+                        Text("🚗 In progress - \(fmtClock(nowT - v.startTime))")
                             .font(.system(size: 16, weight: .bold)).foregroundColor(Pal.orange)
                         Text(String(format: "%.1f km", tripKm) + (consumption.map { String(format: " - %.1f kWh/100 km", $0) } ?? ""))
                             .font(.system(size: 13)).foregroundColor(Pal.text)
                         if let st = trips.activeStage {
-                            Text("\(st.type.label) since \(fmtDuration(nowT - st.startTime))")
+                            Text("\(st.type.label) since \(fmtClock(nowT - st.startTime))")
                                 .font(.system(size: 13)).foregroundColor(Pal.orange)
                         }
                         ForEach(trips.timelineOf(v)) { TimelineRow(item: $0) }
@@ -127,7 +127,7 @@ struct TodayView: View {
                 }
                 if let st = trips.activeStage, st.standalone {
                     DarkCard(border: Pal.blue) {
-                        Text("⚡ Charging in progress - \(fmtDuration(nowT - st.startTime))")
+                        Text("⚡ Charging in progress - \(fmtClock(nowT - st.startTime))")
                             .font(.system(size: 16, weight: .bold)).foregroundColor(Pal.blue)
                         Text(chargeLive).font(.system(size: 13)).foregroundColor(Pal.text)
                     }
