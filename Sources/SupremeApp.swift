@@ -12,7 +12,6 @@ struct SupremeApp: App {
                 .environmentObject(obd)
                 .environmentObject(gps)
                 .environmentObject(trips)
-                .preferredColorScheme(.dark)
         }
     }
 }

@@ -10,20 +10,32 @@ extension Color {
     }
 }
 
+extension Color {
+    /// Couleur qui s'adapte au thème (nuit / jour).
+    init(dark: UInt32, light: UInt32) {
+        self.init(UIColor { trait in
+            let h = trait.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: CGFloat((h >> 16) & 0xFF) / 255, green: CGFloat((h >> 8) & 0xFF) / 255,
+                           blue: CGFloat(h & 0xFF) / 255, alpha: 1)
+        })
+    }
+}
+
 enum Pal {
-    static let bg = Color(hex: 0x070B12)
-    static let bg2 = Color(hex: 0x0D1522)
-    static let card = Color(hex: 0x101826)
-    static let cardBorder = Color(hex: 0x1F2D45)
-    static let text = Color(hex: 0xEAF0FA)
-    static let muted = Color(hex: 0x8D9BB5)
-    static let blue = Color(hex: 0x2F8CFF)
-    static let green = Color(hex: 0x22E07A)
-    static let orange = Color(hex: 0xFF9A2E)
-    static let purple = Color(hex: 0x9B6BFF)
-    static let red = Color(hex: 0xFF5A5F)
-    static let gray = Color(hex: 0x9AA5B8)
-    static let teal = Color(hex: 0x17D4C0)
+    static let bg = Color(dark: 0x070B12, light: 0xF3F6FB)
+    static let bg2 = Color(dark: 0x0D1522, light: 0xE3EAF5)
+    static let card = Color(dark: 0x101826, light: 0xFFFFFF)
+    static let cardBorder = Color(dark: 0x1F2D45, light: 0xB8C4D8)
+    static let track = Color(dark: 0x16223A, light: 0xD3DCEB)
+    static let text = Color(dark: 0xEAF0FA, light: 0x0A1220)
+    static let muted = Color(dark: 0x8D9BB5, light: 0x44546E)
+    static let blue = Color(dark: 0x2F8CFF, light: 0x0A58CA)
+    static let green = Color(dark: 0x22E07A, light: 0x087F3E)
+    static let orange = Color(dark: 0xFF9A2E, light: 0xC25E00)
+    static let purple = Color(dark: 0x9B6BFF, light: 0x5B2FD0)
+    static let red = Color(dark: 0xFF5A5F, light: 0xC8202A)
+    static let gray = Color(dark: 0x9AA5B8, light: 0x4F5B72)
+    static let teal = Color(dark: 0x17D4C0, light: 0x0A857A)
 }
 
 struct DarkCard<Content: View>: View {
@@ -93,7 +105,7 @@ struct SpeedGauge: View {
             let rOuter = s / 2 - stroke * 2
             let ticks = Array(stride(from: 0, through: Int(maxValue), by: majorStep))
             ZStack {
-                GaugeArc(frac: 1, color: Color(hex: 0x16223A), width: stroke)
+                GaugeArc(frac: 1, color: Pal.track, width: stroke)
                 if frac > 0 { GaugeArc(frac: frac, color: accent, width: stroke) }
                 ForEach(ticks, id: \.self) { t in
                     let ang = (135.0 + 270.0 * Double(t) / maxValue) * Double.pi / 180
@@ -105,7 +117,7 @@ struct SpeedGauge: View {
                     .stroke(Pal.muted, lineWidth: 1.5)
                     Text("\(t)")
                         .font(.system(size: s * 0.065))
-                        .foregroundColor(Color(red: 0.78, green: 0.82, blue: 0.9).opacity(0.85))
+                        .foregroundColor(Pal.muted)
                         .position(x: c + CGFloat(cos(ang)) * (rOuter - stroke * 2.3),
                                   y: c + CGFloat(sin(ang)) * (rOuter - stroke * 2.3))
                 }
@@ -142,7 +154,7 @@ struct SocGauge: View {
             let frac = min(max((soc ?? 0) / 100, 0), 1)
             let accent: Color = soc == nil ? Pal.gray : (soc! < 20 ? Pal.red : (soc! < 50 ? Pal.orange : Pal.green))
             ZStack {
-                GaugeArc(frac: 1, color: Color(hex: 0x16223A), width: stroke)
+                GaugeArc(frac: 1, color: Pal.track, width: stroke)
                 if frac > 0 { GaugeArc(frac: frac, color: accent, width: stroke) }
                 VStack(spacing: 0) {
                     Text("🔋").font(.system(size: s * 0.14))
@@ -176,6 +188,8 @@ struct ActionButton: View {
     let accent: Color
     let active: Bool
     let enabled: Bool
+    var timer: String? = nil
+    var timerActive = false
     let action: () -> Void
     var body: some View {
         Button(action: action) {
@@ -187,6 +201,10 @@ struct ActionButton: View {
                     .overlay(RoundedRectangle(cornerRadius: 16).stroke(accent, lineWidth: 1.5))
                 Text(label).font(.system(size: 11)).foregroundColor(Pal.text)
                     .multilineTextAlignment(.center).lineLimit(2)
+                if let timer {
+                    Text(timer).font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(timerActive ? accent : Pal.muted)
+                }
             }
             .frame(maxWidth: .infinity)
         }

@@ -14,6 +14,8 @@ struct LiveView: View {
     let onExit: () -> Void
     let onStartEnd: () -> Void
     let onStage: (StageType) -> Void
+    @AppStorage("theme") var theme = "dark"
+    @Environment(\.colorScheme) var scheme
 
     private var consumption: Double? {
         gps.totalDistanceKm > 0.3 ? obd.dischargeEnergyKwh * 100 / gps.totalDistanceKm : nil
@@ -97,56 +99,34 @@ struct LiveView: View {
         }
     }
 
-    private func stageStyle(_ t: StageType) -> (String, Color) {
-        switch t {
-        case .meal: return ("🍴 Meal", Pal.orange)
-        case .charge: return ("⚡ Charge", Pal.blue)
-        case .chargeMeal: return ("⚡🍴 Charge / Meal", Pal.purple)
-        default: return ("⋯ Other stop", Pal.gray)
-        }
-    }
-
-    private func timerBlock(_ label: String, _ time: String, _ color: Color) -> some View {
-        VStack(spacing: 2) {
-            Text(label).font(.system(size: 11)).foregroundColor(Pal.muted)
-            Text(time).font(.system(size: 28, weight: .bold, design: .monospaced)).foregroundColor(color)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    /// Chronomètres : trajet en cours et arrêt en cours.
-    @ViewBuilder private var timerCard: some View {
-        let nowT = Int64(now.timeIntervalSince1970 * 1000)
-        if trips.activeVoyage != nil || trips.activeStage != nil {
-            DarkCard(border: Pal.orange.opacity(0.6), padding: 10) {
-                HStack(alignment: .top) {
-                    if let v = trips.activeVoyage { timerBlock("🚗 Trip", fmtClock(nowT - v.startTime), Pal.orange) }
-                    if let st = trips.activeStage {
-                        let sty = stageStyle(st.type)
-                        timerBlock(sty.0, fmtClock(nowT - st.startTime), sty.1)
-                    }
-                }
-            }
-        }
-    }
-
     private var actionRow: some View {
         let tripActive = trips.activeVoyage != nil
         let standaloneActive = trips.activeStage?.standalone == true
         let at = trips.activeStage?.type
+        let nowT = Int64(now.timeIntervalSince1970 * 1000)
+        let finished = trips.activeVoyage.map { trips.stopsOf($0) } ?? []
         func enabled(_ t: StageType) -> Bool { (tripActive || standaloneActive) && (at == nil || at == t) }
+        // Chrono de l'étape en cours ; sinon temps cumulé déjà passé sur ce type d'arrêt pendant le voyage.
+        func timerFor(_ t: StageType) -> (String?, Bool) {
+            if let st = trips.activeStage, st.type == t { return (fmtClock(nowT - st.startTime), true) }
+            let c = finished.filter { $0.type == t }.reduce(Int64(0)) { $0 + max(($1.endTime ?? $1.startTime) - $1.startTime, 0) }
+            return (c > 0 ? fmtClock(c) : nil, false)
+        }
+        let tripTimer: String? = trips.activeVoyage.map { fmtClock(nowT - $0.startTime) }
+        let tm = timerFor(.meal), tc = timerFor(.charge), tcm = timerFor(.chargeMeal), to = timerFor(.other)
         return HStack(alignment: .top, spacing: 6) {
             ActionButton(icon: tripActive ? "■" : "▶", label: tripActive ? "End Trip" : "Start Trip",
-                         accent: tripActive ? Pal.red : Pal.green, active: tripActive, enabled: true, action: onStartEnd)
+                         accent: tripActive ? Pal.red : Pal.green, active: tripActive, enabled: true,
+                         timer: tripTimer, timerActive: true, action: onStartEnd)
             ActionButton(icon: "🍴", label: at == .meal ? "End Meal" : "Meal", accent: Pal.orange,
-                         active: at == .meal, enabled: enabled(.meal)) { onStage(.meal) }
+                         active: at == .meal, enabled: enabled(.meal), timer: tm.0, timerActive: tm.1) { onStage(.meal) }
             ActionButton(icon: "⚡", label: at == .charge ? "End Charge" : "Charge", accent: Pal.blue,
-                         active: at == .charge, enabled: enabled(.charge)) { onStage(.charge) }
+                         active: at == .charge, enabled: enabled(.charge), timer: tc.0, timerActive: tc.1) { onStage(.charge) }
             ActionButton(icon: "⚡🍴", label: at == .chargeMeal ? "End Charge / Meal" : (at == .charge ? "+ Meal" : "Charge / Meal"),
                          accent: Pal.purple, active: at == .chargeMeal,
-                         enabled: enabled(.chargeMeal) || at == .charge) { onStage(.chargeMeal) }
+                         enabled: enabled(.chargeMeal) || at == .charge, timer: tcm.0, timerActive: tcm.1) { onStage(.chargeMeal) }
             ActionButton(icon: "⋯", label: at == .other ? "End Other" : "Other", accent: Pal.gray,
-                         active: at == .other, enabled: enabled(.other)) { onStage(.other) }
+                         active: at == .other, enabled: enabled(.other), timer: to.0, timerActive: to.1) { onStage(.other) }
         }
     }
 
@@ -160,6 +140,9 @@ struct LiveView: View {
                     .font(.system(size: landscape ? 11 : 13)).foregroundColor(Pal.muted).lineLimit(1)
             }
             Spacer()
+            Button { theme = (scheme == .dark) ? "light" : "dark" } label: {
+                Text(scheme == .dark ? "☀️" : "🌙").font(.system(size: landscape ? 20 : 24))
+            }
             Button(action: onSettings) { Text("⚙").font(.system(size: landscape ? 20 : 24)).foregroundColor(Pal.muted) }
             Button(action: onExit) { Text("Exit").font(.system(size: landscape ? 13 : 14)).foregroundColor(Pal.red) }
         }
@@ -188,7 +171,6 @@ struct LiveView: View {
                     Text(socNote).font(.system(size: 11)).foregroundColor(socWarn ? Pal.red : Pal.muted).padding(.top, 6)
                 }
                 chargingCard
-                timerCard
                 actionRow
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
@@ -230,8 +212,7 @@ struct LiveView: View {
                         Text(socNote).font(.system(size: 10)).foregroundColor(socWarn ? Pal.red : Pal.muted).padding(.top, 4)
                     }
                     chargingCard
-                    timerCard
-                    actionRow
+                        actionRow
                 }
             }
             .frame(maxWidth: .infinity)
@@ -249,6 +230,8 @@ struct MoreView: View {
     let onExportCsv: () -> Void
     let onExportPdf: () -> Void
     @AppStorage("keepScreenOn") private var keepAwake = true
+    @AppStorage("theme") private var theme = "dark"
+    @AppStorage("usePlugSignal") private var usePlug = true
 
     init(onExit: @escaping () -> Void, onExportCsv: @escaping () -> Void, onExportPdf: @escaping () -> Void) {
         self.onExit = onExit; self.onExportCsv = onExportCsv; self.onExportPdf = onExportPdf
@@ -284,8 +267,21 @@ struct MoreView: View {
                     .padding(.top, 6)
                 }
                 DarkCard {
+                    Text("Display").font(.system(size: 15, weight: .bold)).foregroundColor(Pal.text)
+                    Picker("Display", selection: $theme) {
+                        Text("🌙 Night").tag("dark")
+                        Text("☀️ Day").tag("light")
+                        Text("Auto").tag("auto")
+                    }
+                    .pickerStyle(.segmented).padding(.vertical, 6)
                     Toggle("Keep screen on while the app is open", isOn: $keepAwake)
                         .font(.system(size: 14)).foregroundColor(Pal.text)
+                }
+                DarkCard {
+                    Toggle("Charging needs the charge-port signal", isOn: $usePlug)
+                        .font(.system(size: 14)).foregroundColor(Pal.text)
+                    Text("Avoids mistaking braking for charging. Turn off if charging is no longer detected.")
+                        .font(.system(size: 11)).foregroundColor(Pal.muted)
                 }
                 DarkCard {
                     Text("Diagnostics").font(.system(size: 15, weight: .bold)).foregroundColor(Pal.text)

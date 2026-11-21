@@ -1,6 +1,21 @@
 import SwiftUI
 
-let appVersion = "iOS v3.2 (consumption fix)"
+let appVersion = "iOS v3.3 (clock fix, plug signal, day theme)"
+
+/// Horloge d'une seconde. Vit dans un @StateObject : survit aux recréations de la vue
+/// (un Timer.publish stocké dans la vue était recréé à chaque mise à jour et ne tirait jamais).
+@MainActor
+final class Ticker: ObservableObject {
+    @Published var now = Date()
+    private var timer: Timer?
+    init() {
+        let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.now = Date() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+}
 
 struct RootView: View {
     @EnvironmentObject var obd: ObdBle
@@ -11,7 +26,8 @@ struct RootView: View {
     @AppStorage("keepScreenOn") private var keepAwake = true
 
     @State private var tab = 0
-    @State private var now = Date()
+    @StateObject private var ticker = Ticker()
+    @AppStorage("theme") private var theme = "dark"
     @State private var sheet: SheetKind?
     @State private var detailStart: Int64?
     @State private var actionsTrip: Stage?
@@ -20,7 +36,6 @@ struct RootView: View {
     @State private var stationSuggestions: [ChargeStation] = []
     @State private var shareItem: ShareItem?
 
-    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let items: [(String, String)] = [("Live", "🚗"), ("Today", "📅"), ("History", "🕘"), ("More", "☰")]
 
     private var detail: Stage? {
@@ -47,8 +62,7 @@ struct RootView: View {
                 }
             }
         }
-        .onReceive(clock) { t in
-            now = t
+        .onReceive(ticker.$now) { t in
             // Le GPS indique à l'OBD si la voiture roule (distingue régénération et recharge).
             if let loc = gps.lastLocation {
                 obd.moving = t.timeIntervalSince(loc.timestamp) < 15 && (gps.speedKph ?? 0) > 3.0
@@ -65,6 +79,7 @@ struct RootView: View {
             gps.start()
             if !obd.isActive() { obd.connect() }
         }
+        .preferredColorScheme(chosenScheme)
         .onChange(of: keepAwake) { _ in applyKeepAwake() }
         .onChange(of: scenePhase) { _ in applyKeepAwake() }
         .onChange(of: gps.country) { _ in trips.checkBorder(country: gps.country, adminArea: gps.adminArea, kmNow: gps.totalDistanceKm) }
@@ -100,6 +115,14 @@ struct RootView: View {
         }
     }
 
+    private var chosenScheme: ColorScheme? {
+        switch theme {
+        case "light": return .light
+        case "auto": return nil
+        default: return .dark
+        }
+    }
+
     private func applyKeepAwake() {
         UIApplication.shared.isIdleTimerDisabled = keepAwake
     }
@@ -115,10 +138,10 @@ struct RootView: View {
         } else {
             switch tab {
             case 0:
-                LiveView(now: now, landscape: landscape, availH: size.height - 16, availW: size.width,
+                LiveView(now: ticker.now, landscape: landscape, availH: size.height - 16, availW: size.width,
                          onSettings: { tab = 3 }, onExit: exitApp, onStartEnd: startEnd, onStage: onStage)
             case 1:
-                TodayView(now: now, tripKm: gps.totalDistanceKm, consumption: consumption,
+                TodayView(now: ticker.now, tripKm: gps.totalDistanceKm, consumption: consumption,
                           chargeLive: (obd.chargeAvgKw.map { String(format: "avg %.1f kW", $0) } ?? "avg --")
                               + "  |  " + String(format: "%.2f kWh", obd.chargeEnergyKwh),
                           onOpen: { detailStart = $0.startTime }, onMenu: { actionsTrip = $0 },

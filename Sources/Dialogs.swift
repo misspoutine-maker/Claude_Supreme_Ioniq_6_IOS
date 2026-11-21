@@ -66,7 +66,6 @@ struct PlaceDialog: View {
             .padding(20)
         }
         .background(Pal.bg.ignoresSafeArea())
-        .preferredColorScheme(.dark)
         .onAppear {
             guard !loaded else { return }
             loaded = true

@@ -36,6 +36,7 @@ final class ObdBle: NSObject, ObservableObject {
     @Published var chargeEnergyKwh = 0.0
     @Published var dischargeEnergyKwh = 0.0
     @Published var isCharging = false
+    @Published var plugConnected = false
     @Published var log: [String] = []
 
     var moving = false      // fourni par le GPS
@@ -320,7 +321,13 @@ final class ObdBle: NSObject, ObservableObject {
         lastEnergyTs = now
 
         // Négatif = recharge, mais aussi régénération en roulant : recharge seulement à l'arrêt.
-        let charging = kw < -0.5 && !moving
+        // Octet j (index 9) : bit 0x80 = recharge HV, 0x40 = prise rapide CCS, 0x20 = prise normale AC.
+        let jb = b.count > 9 ? b[9] : 0
+        let plug = (jb & 0x60) != 0
+        let hvCharging = (jb & 0x80) != 0
+        plugConnected = plug
+        let requirePlug = UserDefaults.standard.object(forKey: "usePlugSignal") as? Bool ?? true
+        let charging = kw < -0.5 && !moving && (!requirePlug || plug || hvCharging)
         if charging && !isCharging {
             chargeEnergyKwh = 0
             chargeAvgKw = nil; chargeMaxKw = nil
